@@ -652,21 +652,21 @@ gcloud functions logs read ingest-covid-data --region=$REGION --limit=20
 
 Dashboard web profesional desplegado como **Cloud Function HTTP** que consume la API `covid-query-api` y presenta visualizaciones interactivas con **Chart.js** directamente integrado con **BigQuery**.
 
-**🌐 URL del Dashboard**: 
+** URL del Dashboard**: 
 ```
 https://us-central1-datavid-478812.cloudfunctions.net/covid-dashboard
 ```
 
 **Características**:
-- 📊 **6 KPIs principales**: Casos totales, fallecidos, recuperados, letalidad promedio, edad promedio, departamentos analizados
-- 📈 **Serie temporal mensual**: Gráfico de líneas con evolución de casos y fallecidos por mes
-- 📉 **Top 10 departamentos por letalidad**: Barras horizontales con las tasas de letalidad más altas
-- 🍩 **Distribución por región**: Gráfico doughnut con casos por región geográfica
-- 📊 **Casos por 100k habitantes**: Barras verticales con incidencia normalizada por población
-- 📋 **Tabla BigQuery consolidada**: 36 departamentos con métricas epidemiológicas completas (región, población, casos/100k)
-- 🎨 **Diseño responsivo profesional**: Adaptable a móvil, tablet y desktop con gradientes modernos
-- ⚡ **Carga dinámica híbrida**: API REST + BigQuery en tiempo real
-- 🔄 **Pipeline completo verificado**: Datos actualizados tras ejecución del workflow automático
+-  **6 KPIs principales**: Casos totales, fallecidos, recuperados, letalidad promedio, edad promedio, departamentos analizados
+-  **Serie temporal mensual**: Gráfico de líneas con evolución de casos y fallecidos por mes
+-  **Top 10 departamentos por letalidad**: Barras horizontales con las tasas de letalidad más altas
+-  **Distribución por región**: Gráfico doughnut con casos por región geográfica
+-  **Casos por 100k habitantes**: Barras verticales con incidencia normalizada por población
+-  **Tabla BigQuery consolidada**: 36 departamentos con métricas epidemiológicas completas (región, población, casos/100k)
+-  **Diseño responsivo profesional**: Adaptable a móvil, tablet y desktop con gradientes modernos
+-  **Carga dinámica híbrida**: API REST + BigQuery en tiempo real
+-  **Pipeline completo verificado**: Datos actualizados tras ejecución del workflow automático
 
 ### Despliegue del Dashboard
 
@@ -693,7 +693,7 @@ DASHBOARD_URL=$(gcloud functions describe covid-dashboard \
   --gen2 \
   --format="value(serviceConfig.uri)")
 
-echo "🌐 Dashboard URL: $DASHBOARD_URL"
+echo " Dashboard URL: $DASHBOARD_URL"
 ```
 
 **Salida esperada**:
@@ -808,47 +808,6 @@ Al abrir el dashboard en el navegador, se visualizan:
    - Fuente de datos: Ministerio de Salud Colombia
    - Infraestructura: Apache Spark (GCP Dataproc) + Cloud Workflows
    - Arquitectura: Google Cloud Platform
-
-### Capturas de Pantalla para Presentación
-
-#### Pantallazo P18: Verificación Cloud Function
-
-```bash
-gcloud functions describe covid-dashboard \
-  --region=us-central1 \
-  --gen2 \
-  --format="table(
-    name,
-    state,
-    serviceConfig.uri,
-    serviceConfig.availableMemory,
-    environment
-  )"
-```
-
-**Qué capturar**: Estado ACTIVE, URI pública, memoria 512Mi, environment GEN_2
-
-#### Pantallazo P19: Dashboard en navegador
-
-**Pasos**:
-1. Abrir la URL del dashboard en Chrome/Firefox: `https://us-central1-datavid-478812.cloudfunctions.net/covid-dashboard`
-2. Esperar carga completa de gráficos (2-3 segundos)
-3. Capturar pantalla completa mostrando:
-   - Header profesional con gradiente + badges de tecnologías
-   - Grid de 6 KPIs con animaciones
-   - Los 4 gráficos Chart.js (temporal, letalidad, distribución regional, casos/100k)
-   - Tabla BigQuery con los 36 departamentos enriquecidos
-   - Footer con créditos y tecnologías
-
-**Puntos destacables en la presentación**:
-- ✅ **Visualización profesional** sin necesidad de instalar software
-- ✅ **Acceso público** (compartible con stakeholders mediante URL)
-- ✅ **Integración híbrida**: API REST + BigQuery en tiempo real
-- ✅ **Datos completos**: 36/36 departamentos enriquecidos con región, población y casos/100k
-- ✅ **Pipeline end-to-end verificado**: Desde ingesta MySQL (36 departamentos) → ETL con normalización de nombres → BigQuery con JOIN exitoso → Dashboard actualizado
-- ✅ **Diseño responsivo** (funciona en móvil, tablet, desktop)
-- ✅ **Gráficos interactivos** con Chart.js 4.4.0
-- ✅ **Orquestación automática** mediante Cloud Workflows (20-25 min ejecución completa)
 
 ### Arquitectura del Dashboard
 
@@ -1066,12 +1025,12 @@ https://us-central1-datavid-478812.cloudfunctions.net/covid-dashboard
 ```
 
 **Características**:
-- 📊 4 KPIs principales (casos, fallecidos, letalidad, departamentos)
-- 📈 Gráfico de serie temporal mensual (Chart.js)
-- 📉 Top 10 departamentos por letalidad (barras horizontales)
-- 📋 Tabla completa con ranking de departamentos
-- 🎨 Diseño responsivo (móvil, tablet, desktop)
-- ⚡ Actualización en tiempo real (consume API REST)
+-  4 KPIs principales (casos, fallecidos, letalidad, departamentos)
+-  Gráfico de serie temporal mensual (Chart.js)
+-  Top 10 departamentos por letalidad (barras horizontales)
+-  Tabla completa con ranking de departamentos
+-  Diseño responsivo (móvil, tablet, desktop)
+-  Actualización en tiempo real (consume API REST)
 
 Ver [sección completa del Dashboard](#-dashboard-de-visualización) para instrucciones de despliegue.
 
