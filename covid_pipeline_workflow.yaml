@@ -1,0 +1,355 @@
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - region: "us-central1"
+          - clusterName: "covid-cluster"
+          - rawBucket: "datavid-raw-zone"
+          - trustedBucket: "datavid-trusted-zone"
+          - refinedBucket: "datavid-refined-zone"
+          - scriptsBucket: "datavid-scripts"
+    
+    - log_start:
+        call: sys.log
+        args:
+          text: "=== Iniciando Pipeline COVID Automatizado ==="
+          severity: "INFO"
+    
+    # FASE 1: INGESTA DE DATOS
+    - ingest_covid_data:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-" + projectId + ".cloudfunctions.net/ingest-covid-data"}
+          auth:
+            type: OIDC
+          timeout: 1800
+        result: ingestResult
+    
+    - log_ingest_covid:
+        call: sys.log
+        args:
+          text: "Ingesta COVID completada"
+          severity: "INFO"
+    
+    - ingest_mysql_data:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-" + projectId + ".cloudfunctions.net/ingest-mysql-data"}
+          auth:
+            type: OIDC
+          timeout: 1800
+        result: ingestMysqlResult
+    
+    - log_ingest_mysql:
+        call: sys.log
+        args:
+          text: "Ingesta MySQL completada"
+          severity: "INFO"
+    
+    # FASE 2: CREAR CLUSTER DATAPROC
+    - create_dataproc_cluster:
+        call: http.post
+        args:
+          url: ${"https://dataproc.googleapis.com/v1/projects/" + projectId + "/regions/" + region + "/clusters"}
+          auth:
+            type: OAuth2
+          body:
+            clusterName: ${clusterName}
+            config:
+              gceClusterConfig:
+                serviceAccount: "covid-pipeline-sa@datavid-478812.iam.gserviceaccount.com"
+                serviceAccountScopes:
+                  - "https://www.googleapis.com/auth/cloud-platform"
+              masterConfig:
+                numInstances: 1
+                machineTypeUri: "n1-standard-4"
+                diskConfig:
+                  bootDiskSizeGb: 50
+              workerConfig:
+                numInstances: 2
+                machineTypeUri: "n1-standard-4"
+                diskConfig:
+                  bootDiskSizeGb: 50
+              softwareConfig:
+                imageVersion: "2.1-debian11"
+                properties:
+                  "dataproc:dataproc.allow.zero.workers": "false"
+        result: createClusterResult
+    
+    - log_cluster_created:
+        call: sys.log
+        args:
+          text: '${"Cluster creado: " + clusterName}'
+          severity: "INFO"
+    
+    - wait_cluster_ready:
+        call: sys.sleep
+        args:
+          seconds: 120
+    
+    # FASE 3: EJECUTAR ETL
+    - submit_etl_job:
+        call: http.post
+        args:
+          url: ${"https://dataproc.googleapis.com/v1/projects/" + projectId + "/regions/" + region + "/jobs:submit"}
+          auth:
+            type: OAuth2
+          body:
+            job:
+              placement:
+                clusterName: ${clusterName}
+              pysparkJob:
+                mainPythonFileUri: ${"gs://" + scriptsBucket + "/etl_covid_processing.py"}
+                args:
+                  - ${rawBucket}
+                  - ${trustedBucket}
+        result: etlJobResult
+    
+    - log_etl_submitted:
+        call: sys.log
+        args:
+          text: "Job ETL enviado a Dataproc"
+          severity: "INFO"
+    
+    - wait_etl_job:
+        call: wait_for_job
+        args:
+          projectId: ${projectId}
+          region: ${region}
+          jobId: ${etlJobResult.body.reference.jobId}
+        result: etlStatus
+    
+    - check_etl_status:
+        switch:
+          - condition: ${etlStatus == "DONE"}
+            next: submit_analytics_job
+          - condition: true
+            next: etl_failed
+    
+    - etl_failed:
+        raise:
+          message: "ETL job failed"
+    
+    # FASE 4: EJECUTAR ANALÍTICA
+    - submit_analytics_job:
+        call: http.post
+        args:
+          url: ${"https://dataproc.googleapis.com/v1/projects/" + projectId + "/regions/" + region + "/jobs:submit"}
+          auth:
+            type: OAuth2
+          body:
+            job:
+              placement:
+                clusterName: ${clusterName}
+              pysparkJob:
+                mainPythonFileUri: ${"gs://" + scriptsBucket + "/analytics_descriptive.py"}
+                args:
+                  - ${trustedBucket}
+                  - ${refinedBucket}
+        result: analyticsJobResult
+    
+    - log_analytics_submitted:
+        call: sys.log
+        args:
+          text: "Job Analytics enviado a Dataproc"
+          severity: "INFO"
+    
+    - wait_analytics_job:
+        call: wait_for_job
+        args:
+          projectId: ${projectId}
+          region: ${region}
+          jobId: ${analyticsJobResult.body.reference.jobId}
+        result: analyticsStatus
+    
+    - check_analytics_status:
+        switch:
+          - condition: ${analyticsStatus == "DONE"}
+            next: submit_ml_job
+          - condition: true
+            next: analytics_failed
+    
+    - analytics_failed:
+        raise:
+          message: "Analytics job failed"
+    
+    # FASE 5: EJECUTAR ML (OPCIONAL)
+    - submit_ml_job:
+        try:
+          call: http.post
+          args:
+            url: ${"https://dataproc.googleapis.com/v1/projects/" + projectId + "/regions/" + region + "/jobs:submit"}
+            auth:
+              type: OAuth2
+            body:
+              job:
+                placement:
+                  clusterName: ${clusterName}
+                pysparkJob:
+                  mainPythonFileUri: ${"gs://" + scriptsBucket + "/analytics_ml.py"}
+                  args:
+                    - ${trustedBucket}
+                    - ${refinedBucket}
+          result: mlJobResult
+        except:
+          as: e
+          steps:
+            - log_ml_skipped:
+                call: sys.log
+                args:
+                  text: "ML job omitido o falló (opcional)"
+                  severity: "WARNING"
+            - continue_to_load: 
+                next: load_to_bigquery
+    
+    - wait_ml_job:
+        call: wait_for_job
+        args:
+          projectId: ${projectId}
+          region: ${region}
+          jobId: ${mlJobResult.body.reference.jobId}
+        result: mlStatus
+    
+    # FASE 6: CARGAR A BIGQUERY
+    - load_to_bigquery:
+        call: load_bigquery_tables
+        args:
+          projectId: ${projectId}
+          refinedBucket: ${refinedBucket}
+        result: loadResult
+    
+    - log_bigquery_loaded:
+        call: sys.log
+        args:
+          text: "Datos cargados a BigQuery"
+          severity: "INFO"
+    
+    # FASE 7: ELIMINAR CLUSTER
+    - delete_cluster:
+        call: http.delete
+        args:
+          url: ${"https://dataproc.googleapis.com/v1/projects/" + projectId + "/regions/" + region + "/clusters/" + clusterName}
+          auth:
+            type: OAuth2
+        result: deleteResult
+    
+    - log_cluster_deleted:
+        call: sys.log
+        args:
+          text: '${"Cluster eliminado: " + clusterName}'
+          severity: "INFO"
+    
+    - return_success:
+        return:
+          status: "SUCCESS"
+          message: "Pipeline ejecutado completamente"
+          timestamp: ${sys.now()}
+
+# Subworkflow para esperar jobs
+wait_for_job:
+  params: [projectId, region, jobId]
+  steps:
+    - init_wait:
+        assign:
+          - maxAttempts: 60
+          - attempt: 0
+          - status: "RUNNING"
+    
+    - check_loop:
+        switch:
+          - condition: ${attempt < maxAttempts AND status != "DONE" AND status != "ERROR" AND status != "CANCELLED"}
+            next: get_job_status
+          - condition: ${status == "DONE"}
+            next: return_done
+          - condition: true
+            next: return_failed
+    
+    - get_job_status:
+        call: http.get
+        args:
+          url: ${"https://dataproc.googleapis.com/v1/projects/" + projectId + "/regions/" + region + "/jobs/" + jobId}
+          auth:
+            type: OAuth2
+        result: jobResult
+    
+    - update_status:
+        assign:
+          - status: ${jobResult.body.status.state}
+          - attempt: ${attempt + 1}
+    
+    - wait_interval:
+        call: sys.sleep
+        args:
+          seconds: 30
+    
+    - continue_loop:
+        next: check_loop
+    
+    - return_done:
+        return: "DONE"
+    
+    - return_failed:
+        return: "FAILED"
+
+# Subworkflow para cargar a BigQuery
+load_bigquery_tables:
+  params: [projectId, refinedBucket]
+  steps:
+    - load_temporal:
+        call: http.post
+        args:
+          url: ${"https://bigquery.googleapis.com/bigquery/v2/projects/" + projectId + "/jobs"}
+          auth:
+            type: OAuth2
+          body:
+            configuration:
+              load:
+                sourceUris:
+                  - ${"gs://" + refinedBucket + "/analytics/temporal_mensual.parquet/*"}
+                destinationTable:
+                  projectId: ${projectId}
+                  datasetId: "covid_analytics"
+                  tableId: "temporal_mensual"
+                sourceFormat: "PARQUET"
+                writeDisposition: "WRITE_TRUNCATE"
+    
+    - load_departamentos:
+        call: http.post
+        args:
+          url: ${"https://bigquery.googleapis.com/bigquery/v2/projects/" + projectId + "/jobs"}
+          auth:
+            type: OAuth2
+          body:
+            configuration:
+              load:
+                sourceUris:
+                  - ${"gs://" + refinedBucket + "/analytics/geografia_departamentos.parquet/*"}
+                destinationTable:
+                  projectId: ${projectId}
+                  datasetId: "covid_analytics"
+                  tableId: "geografia_departamentos"
+                sourceFormat: "PARQUET"
+                writeDisposition: "WRITE_TRUNCATE"
+    
+    - load_kpis:
+        call: http.post
+        args:
+          url: ${"https://bigquery.googleapis.com/bigquery/v2/projects/" + projectId + "/jobs"}
+          auth:
+            type: OAuth2
+          body:
+            configuration:
+              load:
+                sourceUris:
+                  - ${"gs://" + refinedBucket + "/analytics/dashboard_kpis.parquet/*"}
+                destinationTable:
+                  projectId: ${projectId}
+                  datasetId: "covid_analytics"
+                  tableId: "dashboard_kpis"
+                sourceFormat: "PARQUET"
+                writeDisposition: "WRITE_TRUNCATE"
+    
+    - return_success:
+        return: "LOADED"
